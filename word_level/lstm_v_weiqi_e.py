@@ -316,7 +316,7 @@ def cli_main(modify_parser=None):
     parser = options.get_training_parser()
     args = options.parse_args_and_arch(parser, modify_parser=modify_parser)
 
-    # train v model
+    # train v model----------------------------------------------------------------------------------------------------
     if args.distributed_init_method is None:
         distributed_utils.infer_init_method(args)
 
@@ -347,10 +347,11 @@ def cli_main(modify_parser=None):
         # single GPU training
         network = main(args)
 
-    # generate adv examples
+    # generate adv examples--------------------------------------------------------------------------------------------
     print('Load victim model.')
     # network.load_state_dict(torch.load('models/parsing/biaffine/network.pt'))  # TODO: 7.13
     # network.to(device)
+    # -----------------------------------------------------------------------------------------------------------------
     network.train()
     FLAG = True
     for para in network.parameters():
@@ -367,24 +368,6 @@ def cli_main(modify_parser=None):
     ori_outf = 'word_level/ori_sentences.txt'
     ori_wf = codecs.open(ori_outf, 'w', encoding='utf8')
     ori_word_embedding = network.parameters().next().detach().data.cpu().numpy().T  # torch.Size([35374, 100])
-    #-------------------------------------------------------------------------------------------------------------------
-        kk = 0
-        print('batch_size: ', str(batch_size))
-        with tf.Graph().as_default(), tf.Session() as sess:
-            with tf.variable_scope("model", reuse=tf.AUTO_REUSE) as model_scope:  # reuse=tf.AUTO_REUSE or reuse=True
-                dataset = load_datasets(load_existing_dump=True)
-                config = dataset.model_config
-                model = ParserModel(config, dataset.word_embedding_matrix, dataset.pos_embedding_matrix,
-                                    dataset.dep_embedding_matrix)
-                saver = tf.train.Saver()
-                model_dir = 'params_2020-01-28'
-                ckpt_path = tf.train.latest_checkpoint(os.path.join(DataConfig.data_dir_path, model_dir))
-                saver.restore(sess, ckpt_path)
-                for batch in conllx_data.iterate_batch_tensor(data_train, batch_size):  # TODO: data_train
-                    kk = kk + 1
-                    print('--------'+str(kk)+'--------')
-                    test_data = dataform_biaf2fastdep(batch)
-                    seudo_heads = fastdep_predict(test_data=test_data, dataset=dataset, sess=sess, model=model, batch_max_length=batch[0].shape[1])
 
                     #----------------
                     optim.zero_grad()
