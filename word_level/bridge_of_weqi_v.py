@@ -1,6 +1,6 @@
 import os, sys
 
-def weqi_predict(batch):
+def weiqi_predict(batch):
     os.system('bash predict_wj.sh')
     f = open('output.word.txt', 'r').read()
 

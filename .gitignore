@@ -7,3 +7,14 @@ seq2seq_rl/
 tmp.tmp.txt
 word_level/__pycache__/
 word_level/ori_sentences.txt
+__pycache__/
+checkpoint_generator/
+checkpoint_v/
+kakao_edin_toho/
+train.src-trg.src
+train.src-trg.trg
+trash/
+valid.src-trg.src
+valid.src-trg.trg
+weiqi_f/
+word_level/predict_wj_rerank.sh
