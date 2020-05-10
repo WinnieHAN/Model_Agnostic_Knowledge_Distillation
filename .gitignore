@@ -18,3 +18,11 @@ valid.src-trg.src
 valid.src-trg.trg
 weiqi_f/
 word_level/predict_wj_rerank.sh
+checkpoint_seq2seq/
+checkpoint_v0/
+err2.log
+out2.log
+*.log
+pbs2.log
+qsub.pbs
+run.sh

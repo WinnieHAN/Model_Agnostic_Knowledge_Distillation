@@ -124,11 +124,11 @@ if __name__ == '__main__':
     src_field = data.Field(sequential=True, tokenize=tokenizer, lower=True, include_lengths=True, batch_first=True, eos_token='<eos>')  # , fix_length=150 use_vocab=False   fix_length=20, init_token='<int>',
     trg_field = src_field
     seq2seq_train_data = datasets.TranslationDataset(
-        path=os.path.join('data', 'debpe', 'train.src-trg'), exts=('.src', '.trg'),
+        path=os.path.join('data', 'debpe', 'train.src-trg'), exts=('.trg', '.src'),
         fields=(src_field, trg_field))
     print('training stcs loaded')
     seq2seq_dev_data = datasets.TranslationDataset(
-        path=os.path.join('data', 'debpe', 'valid.src-trg'), exts=('.src', '.trg'),
+        path=os.path.join('data', 'debpe', 'valid.src-trg'), exts=('.trg', '.src'),
         fields=(src_field, trg_field))
     src_field.build_vocab(seq2seq_train_data, max_size=80000)  # ,vectors="glove.6B.100d"
 
@@ -146,5 +146,5 @@ if __name__ == '__main__':
     num_words = len(src_field.vocab.stoi)
     PAD_IDX = src_field.vocab.stoi['<pad>']
     EOS_IDX = src_field.vocab.stoi['<eos>']
-    seq2seq_save_path = 'checkpoint_v'
+    seq2seq_save_path = 'checkpoint_seq2seq'
     train_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_save_path)
