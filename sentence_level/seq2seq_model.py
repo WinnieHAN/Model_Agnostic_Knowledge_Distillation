@@ -38,6 +38,11 @@ def train_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_
     loss_seq2seq = torch.nn.CrossEntropyLoss(reduction='none').to(device)
     parameters_need_update = filter(lambda p: p.requires_grad, seq2seq.parameters())
     optim_seq2seq = torch.optim.Adam(parameters_need_update, lr=0.0002)
+
+    is_only_eval = False
+    if is_only_eval:
+        seq2seq.load_state_dict(torch.load('checkpoint_seq2seq/model10.pt'))
+
     seq2seq.to(device)
     for i in range(EPOCHS):
         ls_seq2seq_ep = 0
@@ -111,7 +116,7 @@ def train_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_
             # print(acc_denominator_ep)
             print('Valid acc: %.4f%%' % ((acc_numerator_ep * 1.0 / acc_denominator_ep) * 100))
         # for debug TODO:
-        if i%5 == 0:
+        if i%1 == 0:
             torch.save(seq2seq.state_dict(), os.path.join(seq2seq_save_path, 'model'+ str(i) + '.pt'))
 
     return seq2seq
@@ -121,7 +126,7 @@ def tokenizer(text):  # create a tokenizer function
 
 if __name__ == '__main__':
     spacy_en = spacy.load('en_core_web_sm')  # python -m spacy download en
-    src_field = data.Field(sequential=True, tokenize=tokenizer, lower=True, include_lengths=True, batch_first=True, eos_token='<eos>')  # , fix_length=150 use_vocab=False   fix_length=20, init_token='<int>',
+    src_field = data.Field(sequential=True, tokenize=tokenizer, lower=False, include_lengths=True, batch_first=True, eos_token='<eos>')  # , fix_length=150 use_vocab=False   fix_length=20, init_token='<int>',
     trg_field = src_field
     seq2seq_train_data = datasets.TranslationDataset(
         path=os.path.join('data', 'debpe', 'train.src-trg'), exts=('.trg', '.src'),

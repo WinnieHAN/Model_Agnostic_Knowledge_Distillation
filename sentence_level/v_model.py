@@ -38,6 +38,11 @@ def train_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_
     loss_seq2seq = torch.nn.CrossEntropyLoss(reduction='none').to(device)
     parameters_need_update = filter(lambda p: p.requires_grad, seq2seq.parameters())
     optim_seq2seq = torch.optim.Adam(parameters_need_update, lr=0.0002)
+
+    is_only_eval = False
+    if is_only_eval:
+        seq2seq.load_state_dict(torch.load('checkpoint_v/model0.pt'))
+
     seq2seq.to(device)
     for i in range(EPOCHS):
         ls_seq2seq_ep = 0
@@ -57,7 +62,6 @@ def train_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_
             dec_inp = torch.cat((torch.ones(size=[batch_size,1]).long().to(device), trg[:, 0:-1]), dim=1)  # maybe wrong
             # train_seq2seq
             out = seq2seq(inp.long().to(device), is_tr=True, dec_inp=dec_inp.long().to(device))
-
             out = out.view((out.shape[0] * out.shape[1], out.shape[2]))
             dec_out = dec_out.view((dec_out.shape[0] * dec_out.shape[1],))
             # wgt = seq2seq.add_stop_token(masks, lengths_src)  # TODO
@@ -111,7 +115,7 @@ def train_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_
             # print(acc_denominator_ep)
             print('Valid acc: %.4f%%' % ((acc_numerator_ep * 1.0 / acc_denominator_ep) * 100))
         # for debug TODO:
-        if i%5 == 0:
+        if i%1 == 0:
             torch.save(seq2seq.state_dict(), os.path.join(seq2seq_save_path, 'model'+ str(i) + '.pt'))
 
     return seq2seq
@@ -121,7 +125,7 @@ def tokenizer(text):  # create a tokenizer function
 
 if __name__ == '__main__':
     spacy_en = spacy.load('en_core_web_sm')  # python -m spacy download en
-    src_field = data.Field(sequential=True, tokenize=tokenizer, lower=True, include_lengths=True, batch_first=True, eos_token='<eos>')  # , fix_length=150 use_vocab=False   fix_length=20, init_token='<int>',
+    src_field = data.Field(sequential=True, tokenize=tokenizer, lower=False, include_lengths=True, batch_first=True, eos_token='<eos>')  # , fix_length=150 use_vocab=False   fix_length=20, init_token='<int>',
     trg_field = src_field
     seq2seq_train_data = datasets.TranslationDataset(
         path=os.path.join('data', 'debpe', 'train.src-trg'), exts=('.src', '.trg'),
@@ -137,10 +141,10 @@ if __name__ == '__main__':
     device = torch.device('cuda')
 
     train_iter = data.BucketIterator(
-        dataset=seq2seq_train_data, batch_size=64,
+        dataset=seq2seq_train_data, batch_size=10,
         sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)), device=device, shuffle=True)  # Note that if you are runing on CPU, you must set device to be -1, otherwise you can leave it to 0 for GPU.
     dev_iter = data.BucketIterator(
-        dataset=seq2seq_dev_data, batch_size=64,
+        dataset=seq2seq_dev_data, batch_size=10,
         sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)), device=device, shuffle=False)
     hidden_size = 256
     num_words = len(src_field.vocab.stoi)

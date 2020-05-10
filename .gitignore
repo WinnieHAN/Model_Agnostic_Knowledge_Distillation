@@ -26,3 +26,6 @@ out2.log
 pbs2.log
 qsub.pbs
 run.sh
+checkpoint_rl/
+checkpoint_seq2seq_0/
+temp3.py
