@@ -29,3 +29,8 @@ run.sh
 checkpoint_rl/
 checkpoint_seq2seq_0/
 temp3.py
+80003seq2seq_vocab.pickle
+checkpoint_seq2seq_1/
+seq2seq.test.predict.out
+temp_s2s.zip
+test.predict.out

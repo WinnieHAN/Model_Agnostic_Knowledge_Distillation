@@ -50,8 +50,8 @@ def train_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_
         # seq2seq.emb.weight.requires_grad = False
         print('----------' + str(i) + ' iter----------')
         for _, batch in enumerate(train_iter):
-            src, lengths_src = batch.src  # word:(32,50)  150,64
-            trg, lengths_trg = batch.trg
+            src, lengths_src = batch.trg  # word:(32,50)  150,64
+            trg, lengths_trg = batch.src
             batch_size = src.size()[0]
             # max_len = src.size()[1]  # batch_first
             # masks = torch.arange(max_len).expand(len(lengths_src), max_len) < lengths_src.unsqueeze(1)
@@ -91,8 +91,8 @@ def train_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_
             acc_denominator_ep = 0
             testi = 0
             for _, batch in enumerate(dev_iter):  # for _ in range(1, num_batches + 1):  word, char, pos, heads, types, masks, lengths = conllx_data.get_batch_tensor(data_dev, batch_size, unk_replace=unk_replace)  # word:(32,50)  char:(32,50,35)
-                src, lengths_src = batch.src
-                trg, lengths_trg = batch.trg
+                src, lengths_src = batch.trg
+                trg, lengths_trg = batch.src
                 # inp, _ = seq2seq.add_noise(src, lengths_src)
                 inp = src
                 dec_out = trg
@@ -121,6 +121,71 @@ def train_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_
 
     return seq2seq
 
+
+def test_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_load_path):
+    word_dim = 300  #
+    seq2seq = Seq2seq_Model(EMB=word_dim, HID=hidden_size, DPr=0.5, vocab_size=num_words, word_embedd=None,
+                            device=device)  # TODO: random init vocab
+    seq2seq.load_state_dict(torch.load(os.path.join(seq2seq_load_path, 'model'+ str(14) + '.pt')))  # TODO: 10.7
+    seq2seq.to(device)
+
+    if True:  # i%1 == 0:
+        wf = open('seq2seq.test.predict.out', 'wb')
+        seq2seq.eval()
+        bleu_ep = 0
+        acc_numerator_ep = 0
+        acc_denominator_ep = 0
+        testi = 0
+        for _, batch in enumerate(dev_iter):  # for _ in range(1, num_batches + 1):  word, char, pos, heads, types, masks, lengths = conllx_data.get_batch_tensor(data_dev, batch_size, unk_replace=unk_replace)  # word:(32,50)  char:(32,50,35)
+            src, lengths_src = batch.trg
+            trg, lengths_trg = batch.src
+            inp = src
+            # inp, _ = seq2seq.add_noise(word, lengths)
+            dec_out = trg  # TODO: hanwj
+            sel, _ = seq2seq(inp, LEN=inp.size()[1]+5)
+            sel = sel.detach().cpu().numpy()
+            dec_out = dec_out.cpu().numpy()
+
+            bleus = []
+            for j in range(sel.shape[0]):
+                bleu = get_bleu(sel[j], dec_out[j], EOS_IDX)  # sel
+                bleus.append(bleu)
+                numerator, denominator = get_correct(sel[j], dec_out[j], EOS_IDX)
+                sel_idxs = sel[j]
+                # print(sel_idxs)
+                sel_words = idx_to_words(sel_idxs, EOS_IDX, PAD_IDX, src_field.vocab.itos)
+                # print('sel_words: ', sel_words)
+                line = ' '.join(sel_words) + '\n'
+                wf.write(line.encode('utf-8'))
+                acc_numerator_ep += numerator
+                acc_denominator_ep += denominator  # .detach().cpu().numpy() TODO: 10.8
+            bleu_bh = np.average(bleus)
+            bleu_ep += bleu_bh
+            testi += 1
+        bleu_ep /= testi  # num_batches
+        print('testi: ', testi)
+        print('Valid bleu: %.4f%%' % (bleu_ep * 100))
+        # print(acc_denominator_ep)
+        print('Valid acc: %.4f%%' % ((acc_numerator_ep * 1.0 / acc_denominator_ep) * 100))
+        wf.close()
+
+def idx_to_words(out, EOS_IDX, PAD_IDX, itos):
+    out = out.tolist()
+
+    stop_token = PAD_IDX
+    if stop_token in out:
+        out = out[:out.index(stop_token)]
+    else:
+        out = out
+
+    stop_token = EOS_IDX
+    if stop_token in out:
+        cnd = out[:out.index(stop_token)]
+    else:
+        cnd = out
+    cnd = [itos[ii] for ii in cnd]
+    return cnd
+
 def tokenizer(text):  # create a tokenizer function
     return [tok.text for tok in spacy_en.tokenizer(text)]
 
@@ -128,18 +193,22 @@ if __name__ == '__main__':
     spacy_en = spacy.load('en_core_web_sm')  # python -m spacy download en
     src_field = data.Field(sequential=True, tokenize=tokenizer, lower=False, include_lengths=True, batch_first=True, eos_token='<eos>')  # , fix_length=150 use_vocab=False   fix_length=20, init_token='<int>',
     trg_field = src_field
+    print('begin---')
     seq2seq_train_data = datasets.TranslationDataset(
-        path=os.path.join('data', 'debpe', 'train.src-trg'), exts=('.trg', '.src'),
+        path=os.path.join('data', 'debpe', 'train.src-trg'), exts=('.src', '.trg'),
         fields=(src_field, trg_field))
     print('training stcs loaded')
     seq2seq_dev_data = datasets.TranslationDataset(
-        path=os.path.join('data', 'debpe', 'valid.src-trg'), exts=('.trg', '.src'),
+        path=os.path.join('data', 'debpe', 'valid.src-trg'), exts=('.src', '.trg'),
         fields=(src_field, trg_field))
-    src_field.build_vocab(seq2seq_train_data, max_size=80000)  # ,vectors="glove.6B.100d"
+    vocab_thread = 80000+3
+    with open(str(vocab_thread)+'seq2seq_vocab.pickle', 'rb') as f:
+        src_field.vocab = pickle.load(f)
+    # src_field.build_vocab(seq2seq_train_data, max_size=80000)  # ,vectors="glove.6B.100d"
 
     # trg_field.build_vocab(seq2seq_train_data, max_size=80000)
     # mt_dev shares the fields, so it shares their vocab objects
-    device = torch.device('cuda')
+    device = torch.device('cuda:2')
 
     train_iter = data.BucketIterator(
         dataset=seq2seq_train_data, batch_size=64,
@@ -147,9 +216,13 @@ if __name__ == '__main__':
     dev_iter = data.BucketIterator(
         dataset=seq2seq_dev_data, batch_size=64,
         sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)), device=device, shuffle=False)
+    vocab_thread = 80000+3
+    # with open(str(vocab_thread)+'seq2seq_vocab.pickle', 'wb') as f:
+        # pickle.dump(src_field.vocab, f)
     hidden_size = 256
     num_words = len(src_field.vocab.stoi)
     PAD_IDX = src_field.vocab.stoi['<pad>']
     EOS_IDX = src_field.vocab.stoi['<eos>']
-    seq2seq_save_path = 'checkpoint_seq2seq'
+    seq2seq_save_path = seq2seq_load_path = 'checkpoint_seq2seq'
     train_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_save_path)
+    # test_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_load_path)

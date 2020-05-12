@@ -81,9 +81,9 @@ def main():
                              help='v_model_save_path')
     args_parser.add_argument('--v_model_load_path', default='checkpoint_v/model', type=str,
                              help='v_model_load_path')
-    args_parser.add_argument('--seq2seq_save_path', default='checkpoint_generator/seq2seq_save_model', type=str,
+    args_parser.add_argument('--seq2seq_save_path', default='checkpoint_seq2seq/model', type=str,
                              help='seq2seq_save_path')
-    args_parser.add_argument('--seq2seq_load_path', default='checkpoint_generator/seq2seq_save_model', type=str,
+    args_parser.add_argument('--seq2seq_load_path', default='checkpoint_seq2seq_1/model', type=str,
                              help='seq2seq_load_path')
     args_parser.add_argument('--rl_finetune_seq2seq_save_path', default='checkpoint_rl/seq2seq_save_model',
                              type=str, help='rl_finetune_seq2seq_save_path')
@@ -113,65 +113,73 @@ def main():
     np.random.seed(SEED)
     torch.manual_seed(SEED)
     torch.cuda.manual_seed(SEED)
-    device = torch.device('cpu') if not torch.cuda.is_available() else torch.device('cuda:2')
-
+    device_v = torch.device('cpu') if not torch.cuda.is_available() else torch.device('cuda:2')
+    device_seq2seq = torch.device('cpu') if not torch.cuda.is_available() else torch.device('cuda:2')
     def tokenizer(text):  # create a tokenizer function
         return [tok.text for tok in spacy_en.tokenizer(text)]
 
     src_field = data.Field(sequential=True, tokenize=tokenizer, lower=False, include_lengths=True, batch_first=True, eos_token='<eos>')  #use_vocab=False
     trg_field = src_field
     seq2seq_train_data = datasets.TranslationDataset(
-        path=os.path.join('data', 'debpe', 'sample.src-trg'), exts=('.src', '.trg'),
+        path=os.path.join('data', 'debpe', 'train.src-trg'), exts=('.src', '.trg'),
         fields=(src_field, trg_field))
     seq2seq_dev_data = datasets.TranslationDataset(
-        path=os.path.join('data', 'debpe', 'sample.src-trg'), exts=('.src', '.trg'),
+        path=os.path.join('data', 'debpe', 'valid.src-trg'), exts=('.src', '.trg'),
         fields=(src_field, trg_field))
-    src_field.build_vocab(seq2seq_train_data, max_size=80000)  # ,vectors="glove.6B.100d"
+    vocab_thread = 80000+3
+    with open(str(vocab_thread)+'seq2seq_vocab.pickle', 'rb') as f:
+        src_field.vocab = pickle.load(f)
+    # src_field.build_vocab(seq2seq_train_data, max_size=80000)  # ,vectors="glove.6B.100d"
     # trg_field.build_vocab(seq2seq_train_data, max_size=80000)
     # mt_dev shares the fields, so it shares their vocab objects
 
     train_iter = data.BucketIterator(
-        dataset=seq2seq_train_data, batch_size=16,
-        sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)), device=device, shuffle=True)  # Note that if you are runing on CPU, you must set device to be -1, otherwise you can leave it to 0 for GPU.
+        dataset=seq2seq_train_data, batch_size=10,
+        sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)), device=device_seq2seq, shuffle=True)  # Note that if you are runing on CPU, you must set device to be -1, otherwise you can leave it to 0 for GPU.
     dev_iter = data.BucketIterator(
-        dataset=seq2seq_dev_data, batch_size=16,
-        sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)), device=device, shuffle=False)
+        dataset=seq2seq_dev_data, batch_size=10,
+        sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)), device=device_seq2seq, shuffle=False)
 
     # Train v model using ori examples. model name: vmodel
     logging.info('Train v model using ori examples.')
-    num_words = len(src_field.vocab.stoi)  # ?? word_embedd ??
+    num_words = len(src_field.vocab.stoi) #80000+3#len(src_field.vocab.stoi)  # ?? word_embedd ??
     PAD_IDX = src_field.vocab.stoi['<pad>']
     EOS_IDX = src_field.vocab.stoi['<eos>']
     UNK_IDX = src_field.vocab.stoi['<unk>']
     word_dim = 300  # ??
     v_model = Seq2seq_Model(EMB=word_dim, HID=args.hidden_size, DPr=0.5, vocab_size=num_words, word_embedd=None,
-                            device=device).to(device)
-    # v_model.load_state_dict(torch.load(args.v_model_load_path + str(20) + '.pt'))  # TODO: 7.13
-    v_model.to(device)
+                            device=device_v)#.to(device_v)
+    loss_v_model = torch.nn.CrossEntropyLoss(reduction='none').to(device_v)     # criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
+    parameters_need_update_v = filter(lambda p: p.requires_grad, v_model.parameters())
+    optim_v_model = torch.optim.Adam(parameters_need_update_v, lr=0.0002)
+    v_model.load_state_dict(torch.load(args.v_model_load_path + str(0) + '.pt', map_location=device_v))  # TODO: 7.13
+    v_model.to(device_v)
+
 
     # Pretrain seq2seq model using denoising autoencoder. model name: seq2seq model
     logging.info('Pretrain seq2seq model.')
     EPOCHS = 0  # 150
     DECAY = 0.97
-    num_words = len(src_field.vocab.stoi)  # ?? word_embedd ??
+    # num_words = len(src_field.vocab.stoi)  # ?? word_embedd ??
     word_dim = 300  # ??
-    seq2seq = Seq2seq_Model(EMB=word_dim, HID=args.hidden_size, DPr=0.5, vocab_size=num_words, word_embedd=None, device=device).to(device)  # TODO: random init vocab
+    seq2seq = Seq2seq_Model(EMB=word_dim, HID=args.hidden_size, DPr=0.5, vocab_size=num_words, word_embedd=None, device=device_seq2seq)#.to(device_seq2seq)  # TODO: random init vocab
+    seq2seq.to(device_seq2seq)
     print(seq2seq) # seq2seq.emb.weight.requires_grad = False
-    loss_seq2seq = torch.nn.CrossEntropyLoss(reduction='none').to(device)     # criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
+    loss_seq2seq = torch.nn.CrossEntropyLoss(reduction='none').to(device_seq2seq)     # criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
     parameters_need_update = filter(lambda p: p.requires_grad, seq2seq.parameters())
     optim_seq2seq = torch.optim.Adam(parameters_need_update, lr=0.0002)
-    # seq2seq.load_state_dict(torch.load(args.seq2seq_load_path + str(0) + '.pt'))  # TODO: 10.7
-    seq2seq.to(device)
+    seq2seq.load_state_dict(torch.load(args.seq2seq_load_path + str(0) + '.pt', map_location=device_v))  # TODO: 10.7
+    # seq2seq.to(device_seq2seq)
 
     # Train seq2seq model using rl with reward of biaffine. model name: seq2seq model
     logging.info('Train seq2seq model using rl with reward.')
-    EPOCHS = 10  # 0  # 80
+    EPOCHS = 2  # 0  # 80
     DECAY = 0.97
     M = 1  # this is the size of beam searching in rl
     seq2seq.emb.weight.requires_grad = False
     parameters_need_update = filter(lambda p: p.requires_grad, seq2seq.parameters())
     optim_bia_rl = torch.optim.Adam(parameters_need_update, lr=1e-5)  # 1e-5 0.00005
-    loss_gec_rl = DistLossGECRL(device=device, word_alphabet=src_field.vocab.stoi, vocab_size=num_words).to(device)
+    loss_gec_rl = DistLossGECRL(device=device_seq2seq, word_alphabet=src_field.vocab.stoi, vocab_size=num_words).to(device_seq2seq)
     seq2seq.train()
 
     # seq2seq.load_state_dict(torch.load(args.rl_finetune_seq2seq_load_path + str(4) + '.pt'))  # TODO: 7.13
@@ -191,19 +199,21 @@ def main():
             batch_size = src.size()[0]
             max_len = src.size()[1]  # batch_first
             if max_len>50:
+                print('max_len: ', max_len)
                 continue
-            masks = torch.arange(max_len).expand(len(lengths_src), max_len).to(device) < lengths_src.unsqueeze(1)
-            masks = masks.long().to(device)
+            masks = torch.arange(max_len).expand(len(lengths_src), max_len).to(device_seq2seq) < lengths_src.unsqueeze(1)
+            masks = masks.long().to(device_seq2seq)
             batch_ii = batch_ii + 1
             if True:  # inp.size()[1]<15:#True:  #inp.size()[1]<15:
-                _, sel, pb = seq2seq(src.long().to(device), is_tr=True, M=M, LEN=5+src.size()[1])
+                _, sel, pb = seq2seq(src.long().to(device_seq2seq), is_tr=True, M=M, LEN=5+src.size()[1])
                 sel1 = sel.data.detach()
                 try:
                     end_position = torch.eq(sel1, EOS_IDX).nonzero()  # TODO: hanwj END_token=0
                 except RuntimeError:
                     continue
                 lengths_sel, _ = length_masks(sel1, batch_size, end_position)
-                out_pred, _ = v_model(sel, LEN=sel.size()[1]+5)
+                print('sel.device : ', sel.device)
+                out_pred, _ = v_model(sel.to(device_v), LEN=sel.size()[1]+5)
                 sample_wf = 'weiqi_f/sample.tok.src'
                 idx_to_words(sel, EOS_IDX, PAD_IDX, src_field.vocab.itos, sample_wf)
                 sudo_golden_out_words = weiqi_predict_rerank(sample_wf)  #
@@ -226,26 +236,26 @@ def main():
                 trg1 = list_to_tensors(sudo_golden_out, PAD_IDX)
                 v_model.train()
                 
-                dec_inp = torch.cat((torch.ones(size=[batch_size, 1]).long().to(device), trg1[:, 0:-1].to(device)),dim=1)  # 1  = pad_idx
-                out = v_model.forward(sel1.to(device), is_tr=True, dec_inp=dec_inp.long().to(device))
+                dec_inp = torch.cat((torch.ones(size=[batch_size, 1]).long().to(device_v), trg1[:, 0:-1].to(device_v)),dim=1)  # 1  = pad_idx
+                out = v_model.forward(sel1.to(device_v), is_tr=True, dec_inp=dec_inp.long().to(device_v))
                 out = out.view((out.shape[0] * out.shape[1], out.shape[2]))
                 trg1 = trg1.view((trg1.shape[0] * trg1.shape[1],))
-                ls_seq2seq_bh = loss_seq2seq(out, trg1.long().to(device))  # 9600, 8133
-                ls_seq2seq_bh = ls_seq2seq_bh.sum() / ls_seq2seq_bh.numel()
+                ls_v_bh1 = loss_v_model(out, trg1.long().to(device_v))  # 9600, 8133
+                ls_v_bh1 = ls_v_bh1.sum() / ls_v_bh1.numel()
 
                 trg2 = src
                 # trg2_leng = lengths_src
-                dec_inp2 = torch.cat((torch.ones(size=[batch_size, 1]).long().to(device), trg2[:, 0:-1]),dim=1)  # 1  = pad_idx
-                out2 = v_model.forward(sel1.to(device), is_tr=True, dec_inp=dec_inp2.long().to(device))
+                dec_inp2 = torch.cat((torch.ones(size=[batch_size, 1]).long().to(device_v), trg2[:, 0:-1]),dim=1)  # 1  = pad_idx
+                out2 = v_model.forward(sel1.to(device_v), is_tr=True, dec_inp=dec_inp2.long().to(device_v))
                 out2 = out2.view((out2.shape[0] * out2.shape[1], out2.shape[2]))
                 trg2 = trg2.view((trg2.shape[0] * trg2.shape[1],))
-                ls_seq2seq_bh2 = loss_seq2seq(out2, trg2.long().to(device))  # 9600, 8133
-                ls_seq2seq_bh2 = ls_seq2seq_bh2.sum() / ls_seq2seq_bh2.numel()
+                ls_v_bh2 = loss_seq2seq(out2, trg2.long().to(device_v))  # 9600, 8133
+                ls_v_bh2 = ls_v_bh2.sum() / ls_v_bh2.numel()
 
-                loss = ls_seq2seq_bh + ls_seq2seq_bh2
-                optim_seq2seq.zero_grad()
+                loss = ls_v_bh1 + ls_v_bh2
+                optim_v_model.zero_grad()
                 loss.backward()
-                optim_seq2seq.step()
+                optim_v_model.step()
                 loss = loss.cpu().detach().numpy()
                 ls_re_seq2seq_ep += loss
                 ls_re_seq2seq_ep_small += loss
@@ -323,4 +333,3 @@ def count_parameters(model: torch.nn.Module):
 
 if __name__ == '__main__':
     main()
-                                            
