@@ -34,3 +34,4 @@ checkpoint_seq2seq_1/
 seq2seq.test.predict.out
 temp_s2s.zip
 test.predict.out
+*.zip

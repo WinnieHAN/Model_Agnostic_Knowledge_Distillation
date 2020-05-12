@@ -83,7 +83,7 @@ def main():
                              help='v_model_load_path')
     args_parser.add_argument('--seq2seq_save_path', default='checkpoint_seq2seq/model', type=str,
                              help='seq2seq_save_path')
-    args_parser.add_argument('--seq2seq_load_path', default='checkpoint_seq2seq_1/model', type=str,
+    args_parser.add_argument('--seq2seq_load_path', default='checkpoint_seq2seq/model', type=str,
                              help='seq2seq_load_path')
     args_parser.add_argument('--rl_finetune_seq2seq_save_path', default='checkpoint_rl/seq2seq_save_model',
                              type=str, help='rl_finetune_seq2seq_save_path')
@@ -113,8 +113,8 @@ def main():
     np.random.seed(SEED)
     torch.manual_seed(SEED)
     torch.cuda.manual_seed(SEED)
-    device_v = torch.device('cpu') if not torch.cuda.is_available() else torch.device('cuda:2')
-    device_seq2seq = torch.device('cpu') if not torch.cuda.is_available() else torch.device('cuda:2')
+    device_v = torch.device('cpu') if not torch.cuda.is_available() else torch.device('cuda:0')
+    device_seq2seq = torch.device('cpu') if not torch.cuda.is_available() else torch.device('cuda:1')
     def tokenizer(text):  # create a tokenizer function
         return [tok.text for tok in spacy_en.tokenizer(text)]
 
@@ -152,7 +152,7 @@ def main():
     loss_v_model = torch.nn.CrossEntropyLoss(reduction='none').to(device_v)     # criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
     parameters_need_update_v = filter(lambda p: p.requires_grad, v_model.parameters())
     optim_v_model = torch.optim.Adam(parameters_need_update_v, lr=0.0002)
-    v_model.load_state_dict(torch.load(args.v_model_load_path + str(0) + '.pt', map_location=device_v))  # TODO: 7.13
+    v_model.load_state_dict(torch.load(args.v_model_load_path + str(4) + '.pt', map_location=device_v))  # TODO: 7.13
     v_model.to(device_v)
 
 
@@ -168,7 +168,7 @@ def main():
     loss_seq2seq = torch.nn.CrossEntropyLoss(reduction='none').to(device_seq2seq)     # criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
     parameters_need_update = filter(lambda p: p.requires_grad, seq2seq.parameters())
     optim_seq2seq = torch.optim.Adam(parameters_need_update, lr=0.0002)
-    seq2seq.load_state_dict(torch.load(args.seq2seq_load_path + str(0) + '.pt', map_location=device_v))  # TODO: 10.7
+    seq2seq.load_state_dict(torch.load(args.seq2seq_load_path + str(4) + '.pt', map_location=device_v))  # TODO: 10.7
     # seq2seq.to(device_seq2seq)
 
     # Train seq2seq model using rl with reward of biaffine. model name: seq2seq model

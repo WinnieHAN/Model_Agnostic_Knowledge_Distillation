@@ -125,7 +125,7 @@ def test_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_l
     word_dim = 300  #
     seq2seq = Seq2seq_Model(EMB=word_dim, HID=hidden_size, DPr=0.5, vocab_size=num_words, word_embedd=None,
                             device=device).to(device)  # TODO: random init vocab
-    seq2seq.load_state_dict(torch.load(os.path.join(seq2seq_load_path, 'model'+ str(0) + '.pt')))  # TODO: 10.7
+    seq2seq.load_state_dict(torch.load(os.path.join(seq2seq_load_path, 'model'+ str(4) + '.pt')))  # TODO: 10.7
     seq2seq.to(device)
 
     if True:  # i%1 == 0:
@@ -151,9 +151,9 @@ def test_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_l
                 bleus.append(bleu)
                 numerator, denominator = get_correct(sel[j], dec_out[j], EOS_IDX)
                 sel_idxs = sel[j]
-                print(sel_idxs)
+                # print(sel_idxs)
                 sel_words = idx_to_words(sel_idxs, EOS_IDX, PAD_IDX, src_field.vocab.itos)
-                print('sel_words: ', sel_words)
+                # print('sel_words: ', sel_words)
                 line = ' '.join(sel_words) + '\n'
                 wf.write(line.encode('utf-8'))
                 acc_numerator_ep += numerator
@@ -195,11 +195,11 @@ if __name__ == '__main__':
     src_field = data.Field(sequential=True, tokenize=tokenizer, lower=False, include_lengths=True, batch_first=True, eos_token='<eos>')  # , fix_length=150 use_vocab=False   fix_length=20, init_token='<int>',
     trg_field = src_field
     seq2seq_train_data = datasets.TranslationDataset(
-        path=os.path.join('data', 'debpe', 'train.src-trg'), exts=('.src', '.trg'),
+        path=os.path.join('data', 'debpe', 'sample.src-trg'), exts=('.src', '.trg'),
         fields=(src_field, trg_field))
     print('training stcs loaded')
     seq2seq_dev_data = datasets.TranslationDataset(
-        path=os.path.join('data', 'debpe', 'valid.src-trg'), exts=('.src', '.trg'),
+        path=os.path.join('data', 'debpe', 'test.src-trg'), exts=('.src', '.trg'),
         fields=(src_field, trg_field))
     vocab_thread = 80000+3
     with open(str(vocab_thread)+'seq2seq_vocab.pickle', 'rb') as f:
@@ -208,13 +208,13 @@ if __name__ == '__main__':
 
     # trg_field.build_vocab(seq2seq_train_data, max_size=80000)
     # mt_dev shares the fields, so it shares their vocab objects
-    device = torch.device('cuda:3')
+    device = torch.device('cuda:1')
 
     train_iter = data.BucketIterator(
         dataset=seq2seq_train_data, batch_size=64,
         sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)), device=device, shuffle=True)  # Note that if you are runing on CPU, you must set device to be -1, otherwise you can leave it to 0 for GPU.
     dev_iter = data.BucketIterator(
-        dataset=seq2seq_dev_data, batch_size=64,
+        dataset=seq2seq_dev_data, batch_size=1,
         sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)), device=device, shuffle=False)
     hidden_size = 256
     num_words = len(src_field.vocab.stoi)
@@ -222,5 +222,5 @@ if __name__ == '__main__':
     PAD_IDX = src_field.vocab.stoi['<pad>']
     EOS_IDX = src_field.vocab.stoi['<eos>']
     seq2seq_save_path = seq2seq_load_path = 'checkpoint_v'
-    train_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_save_path)
-    # test_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_load_path)
+    # train_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_save_path)
+    test_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_load_path)

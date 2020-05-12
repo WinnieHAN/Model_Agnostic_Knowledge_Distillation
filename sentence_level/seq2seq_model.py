@@ -126,7 +126,7 @@ def test_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_l
     word_dim = 300  #
     seq2seq = Seq2seq_Model(EMB=word_dim, HID=hidden_size, DPr=0.5, vocab_size=num_words, word_embedd=None,
                             device=device)  # TODO: random init vocab
-    seq2seq.load_state_dict(torch.load(os.path.join(seq2seq_load_path, 'model'+ str(14) + '.pt')))  # TODO: 10.7
+    seq2seq.load_state_dict(torch.load(os.path.join(seq2seq_load_path, 'model'+ str(4) + '.pt')))  # TODO: 10.7
     seq2seq.to(device)
 
     if True:  # i%1 == 0:
