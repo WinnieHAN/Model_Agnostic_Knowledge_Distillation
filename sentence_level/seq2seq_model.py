@@ -126,7 +126,7 @@ def test_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_l
     word_dim = 300  #
     seq2seq = Seq2seq_Model(EMB=word_dim, HID=hidden_size, DPr=0.5, vocab_size=num_words, word_embedd=None,
                             device=device)  # TODO: random init vocab
-    seq2seq.load_state_dict(torch.load(os.path.join(seq2seq_load_path, 'model'+ str(4) + '.pt')))  # TODO: 10.7
+    seq2seq.load_state_dict(torch.load(os.path.join(seq2seq_load_path, 'model'+ str(14) + '.pt')))  # TODO: 10.7
     seq2seq.to(device)
 
     if True:  # i%1 == 0:
@@ -193,9 +193,8 @@ if __name__ == '__main__':
     spacy_en = spacy.load('en_core_web_sm')  # python -m spacy download en
     src_field = data.Field(sequential=True, tokenize=tokenizer, lower=False, include_lengths=True, batch_first=True, eos_token='<eos>')  # , fix_length=150 use_vocab=False   fix_length=20, init_token='<int>',
     trg_field = src_field
-    print('begin---')
     seq2seq_train_data = datasets.TranslationDataset(
-        path=os.path.join('data', 'debpe', 'train.src-trg'), exts=('.src', '.trg'),
+        path=os.path.join('data', 'debpe', 'sample.src-trg'), exts=('.src', '.trg'),
         fields=(src_field, trg_field))
     print('training stcs loaded')
     seq2seq_dev_data = datasets.TranslationDataset(
@@ -217,12 +216,12 @@ if __name__ == '__main__':
         dataset=seq2seq_dev_data, batch_size=64,
         sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)), device=device, shuffle=False)
     vocab_thread = 80000+3
-    # with open(str(vocab_thread)+'seq2seq_vocab.pickle', 'wb') as f:
-        # pickle.dump(src_field.vocab, f)
+    with open(str(vocab_thread)+'seq2seq_vocab.pickle', 'wb') as f:
+        pickle.dump(src_field.vocab, f)
     hidden_size = 256
     num_words = len(src_field.vocab.stoi)
     PAD_IDX = src_field.vocab.stoi['<pad>']
     EOS_IDX = src_field.vocab.stoi['<eos>']
-    seq2seq_save_path = seq2seq_load_path = 'checkpoint_seq2seq'
-    train_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_save_path)
-    # test_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_load_path)
+    seq2seq_save_path = seq2seq_load_path = 'checkpoint_seq2seq_1'
+    # train_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_save_path)
+    test_v_model(hidden_size, train_iter, dev_iter, device, num_words, seq2seq_load_path)

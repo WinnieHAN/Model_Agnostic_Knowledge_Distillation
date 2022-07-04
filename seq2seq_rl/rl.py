@@ -9,10 +9,12 @@ import torch, os, codecs, math
 # print('BLEU: %.4f%%' % (bleu * 100))
 
 
-def get_bleu(out, dec_out, vocab_size):
-    out = out.tolist()
-    dec_out = dec_out.tolist()
-    stop_token = 1
+def get_bleu(out, dec_out, EOS_IDX):
+    if not isinstance(out, list):
+        out = out.tolist()
+    if not isinstance(dec_out, list):
+        dec_out = dec_out.tolist()
+    stop_token = EOS_IDX
     if stop_token in out:
         cnd = out[:out.index(stop_token)]
     else:
@@ -28,28 +30,29 @@ def get_bleu(out, dec_out, vocab_size):
     return bleu
 
 
-def get_correct(out, dec_out, num_words):
+def get_correct(out, dec_out, EOS_IDX):
     out = out.tolist()
     dec_out = dec_out.tolist()
-    stop_token = 1
+    stop_token = EOS_IDX
     if stop_token in out:
         cnd = out[:out.index(stop_token)]
     else:
         cnd = out
 
     if stop_token in dec_out:
-        ref = [dec_out[:dec_out.index(stop_token)]]
+        ref = dec_out[:dec_out.index(stop_token)]
     else:
-        ref = [dec_out]
-    tmp = [1 if cnd[i] == ref[i] else 0 for i in range(1, min(len(cnd), len(ref)))]
+        ref = dec_out
+    tmp = [1 if cnd[i] == ref[i] else 0 for i in range(0, min(len(cnd), len(ref)))]
     if not tmp:
         stc_crt = 0
     else:
         stc_crt = sum(tmp)
     if not max(len(cnd), len(ref)) - 1>0:
-        print(max(len(cnd), len(ref)))
+        pass
+        # print(max(len(cnd), len(ref)))
     # assert max(len(cnd), len(ref)) - 1>0
-    return stc_crt, max(len(cnd), len(ref))-1
+    return stc_crt, max(len(cnd), len(ref))
 
 
 class LossRL(nn.Module):
@@ -678,3 +681,93 @@ class DistLossBiafRL(nn.Module):
 
         # loss = ls1
         return loss, np.average(rewards_z1), np.average(ppl) #loss, ls, ls1, bleu, bleu1
+
+class DistLossGECRL(nn.Module):
+    def __init__(self, device, word_alphabet, vocab_size):
+        super(DistLossGECRL, self).__init__()
+
+        self.bl = 0
+        self.bn = 0
+        self.device = device
+        self.word_alphabet = word_alphabet
+        self.vocab_size = vocab_size
+
+    def get_reward_departure(self, out, dec_out, EOS_IDX):
+        # reward = get_bleu(out, dec_out, EOS_IDX)
+        # stc_dda = sum([0 if out[i] == dec_out[i] else 1 for i in range(0, int(length_out.item()))])
+        # reward = stc_dda
+        # return reward
+
+        if not isinstance(out, list):
+            out = out.tolist()
+        if not isinstance(dec_out, list):
+            dec_out = dec_out.tolist()
+        stop_token = EOS_IDX
+        if stop_token in out:
+            cnd = out[:out.index(stop_token)+1]  # consider in eos token in training
+        else:
+            cnd = out
+
+        if stop_token in dec_out:
+            ref = [dec_out[:dec_out.index(stop_token)+1]]  # consider in eos token in training
+        else:
+            ref = [dec_out]
+
+        bleu = BLEU(ref, cnd)
+
+        return 1 - bleu
+
+    def write_text(self, ori_words, ori_words_length, sel, stc_length_out):
+        condsf = 'cands.txt'
+        refs = 'refs.txt'
+        oris = [[self.word_alphabet.get_instance(ori_words[si, wi]).encode('utf-8') for wi in range(1, ori_words_length[si])] for si in range(len(ori_words))]
+        preds = [[self.word_alphabet.get_instance(sel[si, wi]).encode('utf-8') for wi in range(1, stc_length_out[si])] for si in range(len(sel))]
+
+        wf = codecs.open(condsf, 'w', encoding='utf8')
+        preds_tmp = [' '.join(i) for i in preds]
+        preds_s = '\n'.join(preds_tmp)
+        wf.write(preds_s)
+        wf.close()
+
+        wf = codecs.open(refs, 'w', encoding='utf8')
+        oris_tmp = [' '.join(i) for i in oris]
+        oris_s = '\n'.join(oris_tmp)
+        wf.write(oris_s)
+        wf.close()
+
+
+    def forward(self, sel, pb, predicted_out, stc_length_out, sudo_golden_out, EOS_IDX):
+        ####1####
+        batch = sel.shape[0]
+        rewards_z1 = []
+        for i in range(batch):  #batch
+            reward = self.get_reward_departure(predicted_out[i], sudo_golden_out[i], EOS_IDX)  #  we now only consider a simple case. the result of a third-party parser should be added here.
+            rewards_z1.append(reward)
+        rewards_z1 = np.asarray(rewards_z1)
+
+        rewards = rewards_z1 #(rewards_z1)*0.001      #TODO  0.1# + bleus_w*5  (ppl + rewards_z1)*0.001
+
+        ls3 = 0
+        cnt3 = 0
+        stc_length_seq = sel.shape[1]
+        for j in range(stc_length_seq):
+            wgt3 = np.asarray([1 if j < min(stc_length_out[i], stc_length_seq) else 0 for i in range(batch)])  # consider in STOP token  stc_length_out[i]+1
+            ls3 += (- pb[:, j] *
+                    torch.from_numpy(rewards-self.bl).float().to(self.device) *  # rewards-self.bl
+                    torch.from_numpy(wgt3.astype(float)).float().to(self.device)).sum()
+            cnt3 += np.sum(wgt3)
+
+        ls3 /= cnt3
+        rewards_ave3 = np.average(rewards)
+        self.bl = (self.bl * self.bn + rewards_ave3) / (self.bn + 1)
+        self.bn += 1
+
+        loss = ls3
+
+        # print('rewards_z1: ', np.average(rewards_z1))
+        # print('rewards_z2: ', np.average(rewards_z2))
+        # print('meaning_preservation: ', np.average(meaning_preservation))
+        # print('ppl: ', np.average(ppl))
+
+        # loss = ls1
+        return loss, np.average(rewards_z1), None # np.average(ppl) #loss, ls, ls1, bleu, bleu1

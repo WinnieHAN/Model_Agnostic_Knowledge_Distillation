@@ -34,7 +34,6 @@ import spacy
 import torch
 from torchtext import data, datasets
 from word_level.bridge_of_weqi_v import weiqi_predict, weiqi_predict_rerank
-import logging
 
 import fairseq_cli.train
 
@@ -81,31 +80,23 @@ def main():
                              help='v_model_save_path')
     args_parser.add_argument('--v_model_load_path', default='checkpoint_v/model', type=str,
                              help='v_model_load_path')
-    args_parser.add_argument('--seq2seq_save_path', default='checkpoint_seq2seq/model', type=str,
+    args_parser.add_argument('--seq2seq_save_path', default='checkpoint_generator/seq2seq_save_model', type=str,
                              help='seq2seq_save_path')
-    args_parser.add_argument('--seq2seq_load_path', default='checkpoint_seq2seq/model', type=str,
+    args_parser.add_argument('--seq2seq_load_path', default='checkpoint_generator/seq2seq_save_model', type=str,
                              help='seq2seq_load_path')
-    args_parser.add_argument('--rl_finetune_seq2seq_save_path', default='checkpoint_rl/seq2seq_save_model',
+    args_parser.add_argument('--rl_finetune_seq2seq_save_path', default='models/rl_finetune/seq2seq_save_model',
                              type=str, help='rl_finetune_seq2seq_save_path')
-    args_parser.add_argument('--rl_finetune_v_save_path', default='checkpoint_rl/v_save_model',
+    args_parser.add_argument('--rl_finetune_network_save_path', default='models/rl_finetune/network_save_model',
                              type=str, help='rl_finetune_network_save_path')
-    args_parser.add_argument('--rl_finetune_seq2seq_load_path', default='checkpoint_rl/seq2seq_save_model',
+    args_parser.add_argument('--rl_finetune_seq2seq_load_path', default='models/rl_finetune/seq2seq_save_model',
                              type=str, help='rl_finetune_seq2seq_load_path')
-    args_parser.add_argument('--rl_finetune_v_load_path', default='checkpoint_rl/v_save_model',
+    args_parser.add_argument('--rl_finetune_network_load_path', default='models/rl_finetune/network_save_model',
                              type=str, help='rl_finetune_network_load_path')
 
 
     args_parser.add_argument('--direct_eval', action='store_true', help='direct eval without generation process')
     args = args_parser.parse_args()
 
-    logging.basicConfig(level=logging.DEBUG,  # level: debug < info < warning < error < critical
-                    filename='/home/projects/11001764/wenjuan/gec_distillation/new.log',
-                    filemode='w',  # module w: write and overwrite a: add
-                    format='%(asctime)s: %(message)s'
-                    #'%(asctime)s - %(pathname)s[line:%(lineno)d] - %(levelname)s: %(message)s'
-                    # print type
-                    )
-    log_wf = open('/home/projects/11001764/wenjuan/gec_distillation/training.log', 'w')
     spacy_en = spacy.load('en_core_web_sm')  # python -m spacy download en
 
     SEED = 0
@@ -113,84 +104,74 @@ def main():
     np.random.seed(SEED)
     torch.manual_seed(SEED)
     torch.cuda.manual_seed(SEED)
-    device_v = torch.device('cpu') if not torch.cuda.is_available() else torch.device('cuda:0')
-    device_seq2seq = torch.device('cpu') if not torch.cuda.is_available() else torch.device('cuda:1')
+    device = torch.device('cpu') if not torch.cuda.is_available() else torch.device('cuda')
+
     def tokenizer(text):  # create a tokenizer function
         return [tok.text for tok in spacy_en.tokenizer(text)]
 
-    src_field = data.Field(sequential=True, tokenize=tokenizer, lower=False, include_lengths=True, batch_first=True, eos_token='<eos>')  #use_vocab=False
+    src_field = data.Field(sequential=True, tokenize=tokenizer, lower=True, include_lengths=True, batch_first=True, eos_token='<eos>')  #use_vocab=False
     trg_field = src_field
     seq2seq_train_data = datasets.TranslationDataset(
-        path=os.path.join('data', 'debpe', 'train.src-trg'), exts=('.src', '.trg'),
+        path=os.path.join('data', 'debpe', 'sample.src-trg'), exts=('.src', '.trg'),
         fields=(src_field, trg_field))
     seq2seq_dev_data = datasets.TranslationDataset(
-        path=os.path.join('data', 'debpe', 'valid.src-trg'), exts=('.src', '.trg'),
+        path=os.path.join('data', 'debpe', 'sample.src-trg'), exts=('.src', '.trg'),
         fields=(src_field, trg_field))
-    vocab_thread = 80000+3
-    with open(str(vocab_thread)+'seq2seq_vocab.pickle', 'rb') as f:
-        src_field.vocab = pickle.load(f)
-    # src_field.build_vocab(seq2seq_train_data, max_size=80000)  # ,vectors="glove.6B.100d"
+    src_field.build_vocab(seq2seq_train_data, max_size=80000)  # ,vectors="glove.6B.100d"
     # trg_field.build_vocab(seq2seq_train_data, max_size=80000)
     # mt_dev shares the fields, so it shares their vocab objects
 
     train_iter = data.BucketIterator(
-        dataset=seq2seq_train_data, batch_size=10,
-        sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)), device=device_seq2seq, shuffle=True)  # Note that if you are runing on CPU, you must set device to be -1, otherwise you can leave it to 0 for GPU.
+        dataset=seq2seq_train_data, batch_size=64,
+        sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)), device=-1, shuffle=True)  # Note that if you are runing on CPU, you must set device to be -1, otherwise you can leave it to 0 for GPU.
     dev_iter = data.BucketIterator(
-        dataset=seq2seq_dev_data, batch_size=10,
-        sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)), device=device_seq2seq, shuffle=False)
+        dataset=seq2seq_dev_data, batch_size=64,
+        sort_key=lambda x: data.interleave_keys(len(x.src), len(x.trg)), device=-1, shuffle=False)
 
     # Train v model using ori examples. model name: vmodel
-    logging.info('Train v model using ori examples.')
-    num_words = len(src_field.vocab.stoi) #80000+3#len(src_field.vocab.stoi)  # ?? word_embedd ??
+    print('Train v model using ori examples.')
+    num_words = len(src_field.vocab.stoi)  # ?? word_embedd ??
     PAD_IDX = src_field.vocab.stoi['<pad>']
     EOS_IDX = src_field.vocab.stoi['<eos>']
     UNK_IDX = src_field.vocab.stoi['<unk>']
     word_dim = 300  # ??
     v_model = Seq2seq_Model(EMB=word_dim, HID=args.hidden_size, DPr=0.5, vocab_size=num_words, word_embedd=None,
-                            device=device_v)#.to(device_v)
-    loss_v_model = torch.nn.CrossEntropyLoss(reduction='none').to(device_v)     # criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
-    parameters_need_update_v = filter(lambda p: p.requires_grad, v_model.parameters())
-    optim_v_model = torch.optim.Adam(parameters_need_update_v, lr=0.0002)
-    v_model.load_state_dict(torch.load(args.v_model_load_path + str(4) + '.pt', map_location=device_v))  # TODO: 7.13
-    v_model.to(device_v)
-
+                            device=device).to(device)
+    # v_model.load_state_dict(torch.load(args.v_model_load_path + str(20) + '.pt'))  # TODO: 7.13
+    v_model.to(device)
 
     # Pretrain seq2seq model using denoising autoencoder. model name: seq2seq model
-    logging.info('Pretrain seq2seq model.')
+    print('Pretrain seq2seq model.')
     EPOCHS = 0  # 150
     DECAY = 0.97
-    # num_words = len(src_field.vocab.stoi)  # ?? word_embedd ??
+    num_words = len(src_field.vocab.stoi)  # ?? word_embedd ??
     word_dim = 300  # ??
-    seq2seq = Seq2seq_Model(EMB=word_dim, HID=args.hidden_size, DPr=0.5, vocab_size=num_words, word_embedd=None, device=device_seq2seq)#.to(device_seq2seq)  # TODO: random init vocab
-    seq2seq.to(device_seq2seq)
+    seq2seq = Seq2seq_Model(EMB=word_dim, HID=args.hidden_size, DPr=0.5, vocab_size=num_words, word_embedd=None, device=device).to(device)  # TODO: random init vocab
     print(seq2seq) # seq2seq.emb.weight.requires_grad = False
-    loss_seq2seq = torch.nn.CrossEntropyLoss(reduction='none').to(device_seq2seq)     # criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
+    loss_seq2seq = torch.nn.CrossEntropyLoss(reduction='none').to(device)     # criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
     parameters_need_update = filter(lambda p: p.requires_grad, seq2seq.parameters())
     optim_seq2seq = torch.optim.Adam(parameters_need_update, lr=0.0002)
-    seq2seq.load_state_dict(torch.load(args.seq2seq_load_path + str(4) + '.pt', map_location=device_v))  # TODO: 10.7
-    # seq2seq.to(device_seq2seq)
+    # seq2seq.load_state_dict(torch.load(args.seq2seq_load_path + str(0) + '.pt'))  # TODO: 10.7
+    seq2seq.to(device)
 
     # Train seq2seq model using rl with reward of biaffine. model name: seq2seq model
-    logging.info('Train seq2seq model using rl with reward.')
-    EPOCHS = 2  # 0  # 80
+    print('Train seq2seq model using rl with reward.')
+    EPOCHS = 10  # 0  # 80
     DECAY = 0.97
     M = 1  # this is the size of beam searching in rl
     seq2seq.emb.weight.requires_grad = False
     parameters_need_update = filter(lambda p: p.requires_grad, seq2seq.parameters())
     optim_bia_rl = torch.optim.Adam(parameters_need_update, lr=1e-5)  # 1e-5 0.00005
-    loss_gec_rl = DistLossGECRL(device=device_seq2seq, word_alphabet=src_field.vocab.stoi, vocab_size=num_words).to(device_seq2seq)
+    loss_gec_rl = DistLossGECRL(device=device, word_alphabet=src_field.vocab.stoi, vocab_size=num_words).to(device)
     seq2seq.train()
 
     # seq2seq.load_state_dict(torch.load(args.rl_finetune_seq2seq_load_path + str(4) + '.pt'))  # TODO: 7.13
     # seq2seq.to(device)
     # network.load_state_dict(torch.load(args.rl_finetune_network_load_path + str(4) + '.pt'))  # TODO: 7.13
     # network.to(device)
-    batch_ii = 0
-    ls_rl_ep_small = rewards1_small = ls_re_seq2seq_ep_small = 0
+
     for epoch_i in range(EPOCHS):
-        logging.info('----------------epoch '+str(epoch_i)+'---------------------')
-        log_wf.write('----------------epoch '+str(epoch_i)+'---------------------'+ '\n')
+        print('----------------epoch '+str(epoch_i)+'---------------------')
         ls_rl_ep = rewards1 = ls_re_seq2seq_ep = 0
         for _, batch in enumerate(train_iter):
             v_model.eval()
@@ -198,29 +179,22 @@ def main():
             trg, lengths_trg = batch.src
             batch_size = src.size()[0]
             max_len = src.size()[1]  # batch_first
-            if max_len>50:
-                print('max_len: ', max_len)
-                continue
-            masks = torch.arange(max_len).expand(len(lengths_src), max_len).to(device_seq2seq) < lengths_src.unsqueeze(1)
-            masks = masks.long().to(device_seq2seq)
-            batch_ii = batch_ii + 1
+            masks = torch.arange(max_len).expand(len(lengths_src), max_len) < lengths_src.unsqueeze(1)
+            masks = masks.long().to(device)
             if True:  # inp.size()[1]<15:#True:  #inp.size()[1]<15:
-                _, sel, pb = seq2seq(src.long().to(device_seq2seq), is_tr=True, M=M, LEN=5+src.size()[1])
+                _, sel, pb = seq2seq(src.long().to(device), is_tr=True, M=M, LEN=5+src.size()[1])
                 sel1 = sel.data.detach()
                 try:
                     end_position = torch.eq(sel1, EOS_IDX).nonzero()  # TODO: hanwj END_token=0
                 except RuntimeError:
                     continue
                 lengths_sel, _ = length_masks(sel1, batch_size, end_position)
-                print('sel.device : ', sel.device)
-                out_pred, _ = v_model(sel.to(device_v), LEN=sel.size()[1]+5)
+                out_pred, _ = v_model(sel, LEN=sel.size()[1]+5)
                 sample_wf = 'weiqi_f/sample.tok.src'
                 idx_to_words(sel, EOS_IDX, PAD_IDX, src_field.vocab.itos, sample_wf)
                 sudo_golden_out_words = weiqi_predict_rerank(sample_wf)  #
-                if not sudo_golden_out_words:
-                    continue
-                sudo_golden_out_words = [s.strip(b'\n')+b' <eos>' for s in sudo_golden_out_words]
-                sudo_golden_out = [[src_field.vocab.stoi[w] for w in s.split(b' ')] for s in sudo_golden_out_words]  #not batch, list
+                sudo_golden_out_words = [s.strip('\n')+' <eos>' for s in sudo_golden_out_words]
+                sudo_golden_out = [[src_field.vocab.stoi[w] for w in s.split()] for s in sudo_golden_out_words]  #not batch, list
                 ls_rl_bh, reward1, _ = loss_gec_rl(sel, pb, predicted_out=out_pred, stc_length_out=lengths_sel, sudo_golden_out=sudo_golden_out, EOS_IDX=EOS_IDX)  # sudo_heads_pred_1 TODO: (sel, pb, heads)  # heads is replaced by dec_out.long().to(device)
                 optim_bia_rl.zero_grad()
                 ls_rl_bh.backward()
@@ -228,58 +202,38 @@ def main():
                 ls_rl_bh = ls_rl_bh.cpu().detach().numpy()
                 ls_rl_ep += ls_rl_bh
                 rewards1 += reward1
-                ls_rl_ep_small += ls_rl_bh
-                rewards1_small += reward1
 
             retrain_v_model = True
             if retrain_v_model:
                 trg1 = list_to_tensors(sudo_golden_out, PAD_IDX)
                 v_model.train()
-                
-                dec_inp = torch.cat((torch.ones(size=[batch_size, 1]).long().to(device_v), trg1[:, 0:-1].to(device_v)),dim=1)  # 1  = pad_idx
-                out = v_model.forward(sel1.to(device_v), is_tr=True, dec_inp=dec_inp.long().to(device_v))
+
+                dec_inp = torch.cat((torch.ones(size=[batch_size, 1]).long().to(device), trg1[:, 0:-1]),dim=1)  # 1  = pad_idx
+                out = v_model.forward(sel1.to(device), is_tr=True, dec_inp=dec_inp.long().to(device))
                 out = out.view((out.shape[0] * out.shape[1], out.shape[2]))
                 trg1 = trg1.view((trg1.shape[0] * trg1.shape[1],))
-                ls_v_bh1 = loss_v_model(out, trg1.long().to(device_v))  # 9600, 8133
-                ls_v_bh1 = ls_v_bh1.sum() / ls_v_bh1.numel()
+                ls_seq2seq_bh = loss_seq2seq(out, trg1.long().to(device))  # 9600, 8133
+                ls_seq2seq_bh = ls_seq2seq_bh.sum() / ls_seq2seq_bh.numel()
 
                 trg2 = src
                 # trg2_leng = lengths_src
-                dec_inp2 = torch.cat((torch.ones(size=[batch_size, 1]).long().to(device_v), trg2[:, 0:-1]),dim=1)  # 1  = pad_idx
-                out2 = v_model.forward(sel1.to(device_v), is_tr=True, dec_inp=dec_inp2.long().to(device_v))
+                dec_inp2 = torch.cat((torch.ones(size=[batch_size, 1]).long().to(device), trg2[:, 0:-1]),dim=1)  # 1  = pad_idx
+                out2 = v_model.forward(sel1.to(device), is_tr=True, dec_inp=dec_inp2.long().to(device))
                 out2 = out2.view((out2.shape[0] * out2.shape[1], out2.shape[2]))
                 trg2 = trg2.view((trg2.shape[0] * trg2.shape[1],))
-                ls_v_bh2 = loss_seq2seq(out2, trg2.long().to(device_v))  # 9600, 8133
-                ls_v_bh2 = ls_v_bh2.sum() / ls_v_bh2.numel()
+                ls_seq2seq_bh2 = loss_seq2seq(out2, trg2.long().to(device))  # 9600, 8133
+                ls_seq2seq_bh2 = ls_seq2seq_bh2.sum() / ls_seq2seq_bh2.numel()
 
-                loss = ls_v_bh1 + ls_v_bh2
-                optim_v_model.zero_grad()
+                loss = ls_seq2seq_bh + ls_seq2seq_bh2
+                optim_seq2seq.zero_grad()
                 loss.backward()
-                optim_v_model.step()
+                optim_seq2seq.step()
                 loss = loss.cpu().detach().numpy()
                 ls_re_seq2seq_ep += loss
-                ls_re_seq2seq_ep_small += loss
                 # v_model.forward(src=sel1, src_leng=lengths_sel, trg1=trg1, trg1_leng=trg1_leng, trg2=src, trg2_leng=lengths_src)  # trg1 e_model_out  trg2 gold
-            if batch_ii%100==0:
-                logging.info('test loss small---: ' + str(ls_rl_ep_small))
-                logging.info('test reward parser b small---: ' + str(rewards1_small))
-                logging.info('ls_re_seq2seq_ep small---: ' + str(ls_re_seq2seq_ep_small))
-                log_wf.write('test loss small---: ' + str(ls_rl_ep_small) + '\n')
-                log_wf.write('test reward parser b small---: ' + str(rewards1_small)+ '\n')
-                log_wf.write('ls_re_seq2seq_ep small---: ' + str(ls_re_seq2seq_ep_small)+ '\n')
-                ls_rl_ep_small = rewards1_small = ls_re_seq2seq_ep_small = 0
-                torch.save(seq2seq.state_dict(), args.rl_finetune_seq2seq_save_path + '_batch'+ str(batch_ii) + '.pt')
-                torch.save(v_model.state_dict(), args.rl_finetune_v_save_path + '_batch'+ str(batch_ii) + '.pt')
-        logging.info('test loss: ' + str(ls_rl_ep))
-        logging.info('test reward parser b: '+ str(rewards1))
-        logging.info('ls_re_seq2seq_ep: ' + str(ls_re_seq2seq_ep))
-        log_wf.write('test loss: ' + str(ls_rl_ep)+ '\n')
-        log_wf.write('test reward parser b: '+ str(rewards1)+ '\n')
-        log_wf.write('ls_re_seq2seq_ep: ' + str(ls_re_seq2seq_ep)+ '\n')
-        if epoch_i%1==0:
-            torch.save(seq2seq.state_dict(), args.rl_finetune_seq2seq_save_path + '_model'+ str(epoch_i) + '.pt')
-            torch.save(v_model.state_dict(), args.rl_finetune_v_save_path + '_model'+ str(epoch_i) + '.pt')
-    log_wf.close()
+        print('test loss: ', ls_rl_ep)
+        print('test reward parser b: ', rewards1)
+        print('ls_re_seq2seq_ep: ', ls_re_seq2seq_ep)
 
 
 def list_to_tensors(sudo_golden_out, PAD_IDX):

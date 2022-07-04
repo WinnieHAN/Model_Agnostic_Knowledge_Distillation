@@ -16,7 +16,10 @@ class Seq2seq_Model(nn.Module):
         self.num_layers = 1
         self.device = device
 
-        self.emb = word_embedd  # nn.Embedding(self.vocab_size + 2, self.EMB)
+        if word_embedd:
+            self.emb = word_embedd
+        else:
+            self.emb = nn.Embedding(self.vocab_size + 2, self.EMB)
 
         self.enc = nn.LSTM(self.EMB, self.HID,  # GRU
                           batch_first=True, bidirectional=True, num_layers=self.num_layers)
@@ -32,7 +35,7 @@ class Seq2seq_Model(nn.Module):
     def init(self):
         stdv = 1 / math.sqrt(self.HID * 2)
 
-        self.att.data.uniform_(stdv, -stdv)
+        self.att.data.uniform_(-stdv, stdv)
 
     def run_dec(self, dec_inp, out_enc, h):
         dec_inp = self.emb(dec_inp)
@@ -68,7 +71,7 @@ class Seq2seq_Model(nn.Module):
 
         else:
             # dec_inp = torch.ones((inp.shape[0], 1)).long().cuda() * 2  # id of start: self.vocab_size # START [50,1]
-            dec_inp = torch.ones((inp.shape[0], 1)).long().to(self.device) * 2  # id of start: self.vocab_size # START [50,1]
+            dec_inp = torch.ones((inp.shape[0], 1)).long().to(self.device) #* 2  # id of start: self.vocab_size # START [50,1]
             if is_tr == True:
                 if self.isLSTM:
                     h = (torch.cat([h[0] for _ in range(M)], dim=1), torch.cat([h[1] for _ in range(M)], dim=1))  # (1, 200, 128)

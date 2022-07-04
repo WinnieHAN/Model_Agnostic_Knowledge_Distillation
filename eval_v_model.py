@@ -77,7 +77,7 @@ if __name__ == '__main__':
     src_field = data.Field(sequential=True, tokenize=tokenizer, lower=True, include_lengths=True, batch_first=True, eos_token='<eos>')  # , fix_length=150 use_vocab=False   fix_length=20,
     trg_field = src_field
     seq2seq_train_data = datasets.TranslationDataset(
-        path=os.path.join('data', 'debpe', 'train.src-trg'), exts=('.src', '.trg'),
+        path=os.path.join('data', 'debpe', 'sample.src-trg'), exts=('.src', '.trg'),
         fields=(src_field, trg_field))
     print('training stcs loaded')
     seq2seq_dev_data = datasets.TranslationDataset(
