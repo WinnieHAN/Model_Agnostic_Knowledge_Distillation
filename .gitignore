@@ -3,7 +3,6 @@ checkpoints/
 data/
 fairseq-transformer/
 fairseq/
-seq2seq_rl/
 tmp.tmp.txt
 word_level/__pycache__/
 word_level/ori_sentences.txt
