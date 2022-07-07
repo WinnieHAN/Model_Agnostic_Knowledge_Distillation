@@ -2,7 +2,7 @@ from __future__ import print_function
 
 __author__ = 'max'
 """
-Implementation of Bi-directional LSTM-CNNs-TreeCRF model for Graph-based dependency parsing.
+Implementation
 """
 
 import sys
@@ -33,9 +33,11 @@ import pickle, random
 import spacy
 import torch
 from torchtext import data, datasets
+import torchtext
 from word_level.bridge_of_weqi_v import weiqi_predict, weiqi_predict_rerank
-
-import fairseq_cli.train
+# import torchtext.data.Fields
+# import fairseq_cli.train
+import tqdm
 
 uid = uuid.uuid4().hex[:6]
 
@@ -78,7 +80,7 @@ def main():
 
     args_parser.add_argument('--v_model_save_path', default='checkpoint_v/model', type=str,
                              help='v_model_save_path')
-    args_parser.add_argument('--v_model_load_path', default='checkpoint_v/model', type=str,
+    args_parser.add_argument('--v_model_load_path', default='checkpoint_generator/model', type=str,
                              help='v_model_load_path')
     args_parser.add_argument('--seq2seq_save_path', default='checkpoint_generator/seq2seq_save_model', type=str,
                              help='seq2seq_save_path')
@@ -109,13 +111,15 @@ def main():
     def tokenizer(text):  # create a tokenizer function
         return [tok.text for tok in spacy_en.tokenizer(text)]
 
-    src_field = data.Field(sequential=True, tokenize=tokenizer, lower=True, include_lengths=True, batch_first=True, eos_token='<eos>')  #use_vocab=False
+    # src_field = torchtext.data.Field(sequential=True, tokenize=tokenizer, lower=True, include_lengths=True, batch_first=True, eos_token='<eos>')  #use_vocab=False
+    src_field = torchtext.data.Field(sequential=True, tokenize=tokenizer, lower=True, include_lengths=True, batch_first=True, eos_token='<eos>')  #use_vocab=False
     trg_field = src_field
+    # from torchtext.datasets.
     seq2seq_train_data = datasets.TranslationDataset(
-        path=os.path.join('data', 'debpe', 'sample.src-trg'), exts=('.src', '.trg'),
+        path=os.path.join('data', 'debpe', 'train.src-trg'), exts=('.src', '.trg'),
         fields=(src_field, trg_field))
     seq2seq_dev_data = datasets.TranslationDataset(
-        path=os.path.join('data', 'debpe', 'sample.src-trg'), exts=('.src', '.trg'),
+        path=os.path.join('data', 'debpe', 'valid.src-trg'), exts=('.src', '.trg'),
         fields=(src_field, trg_field))
     src_field.build_vocab(seq2seq_train_data, max_size=80000)  # ,vectors="glove.6B.100d"
     # trg_field.build_vocab(seq2seq_train_data, max_size=80000)
@@ -137,7 +141,9 @@ def main():
     word_dim = 300  # ??
     v_model = Seq2seq_Model(EMB=word_dim, HID=args.hidden_size, DPr=0.5, vocab_size=num_words, word_embedd=None,
                             device=device).to(device)
-    # v_model.load_state_dict(torch.load(args.v_model_load_path + str(20) + '.pt'))  # TODO: 7.13
+    # v_model.load_state_dict(torch.load(args.v_model_load_path + str(0) + '.pt'))  # TODO: 7.13--20
+
+    # v_model.load_state_dict(torch.load('checkpoint_generator/seq2seq_save_model0.pt'))  # TODO: 7.13--20
     v_model.to(device)
 
     # Pretrain seq2seq model using denoising autoencoder. model name: seq2seq model
@@ -151,12 +157,12 @@ def main():
     loss_seq2seq = torch.nn.CrossEntropyLoss(reduction='none').to(device)     # criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
     parameters_need_update = filter(lambda p: p.requires_grad, seq2seq.parameters())
     optim_seq2seq = torch.optim.Adam(parameters_need_update, lr=0.0002)
-    # seq2seq.load_state_dict(torch.load(args.seq2seq_load_path + str(0) + '.pt'))  # TODO: 10.7
+    # seq2seq.load_state_dict(torch.load(args.seq2seq_load_path + str(0) + '.pt'))  # TODO: 10.7--0
     seq2seq.to(device)
 
     # Train seq2seq model using rl with reward of biaffine. model name: seq2seq model
     print('Train seq2seq model using rl with reward.')
-    EPOCHS = 10  # 0  # 80
+    EPOCHS = 1  # 0  # 80
     DECAY = 0.97
     M = 1  # this is the size of beam searching in rl
     seq2seq.emb.weight.requires_grad = False
@@ -173,7 +179,8 @@ def main():
     for epoch_i in range(EPOCHS):
         print('----------------epoch '+str(epoch_i)+'---------------------')
         ls_rl_ep = rewards1 = ls_re_seq2seq_ep = 0
-        for _, batch in enumerate(train_iter):
+        for batch_i, batch in enumerate(train_iter):
+            print('--------train_iter %s--------'%(str(batch_i)))
             v_model.eval()
             src, lengths_src = batch.trg  # word:(32,50)  150,64
             trg, lengths_trg = batch.src
@@ -208,7 +215,7 @@ def main():
                 trg1 = list_to_tensors(sudo_golden_out, PAD_IDX)
                 v_model.train()
 
-                dec_inp = torch.cat((torch.ones(size=[batch_size, 1]).long().to(device), trg1[:, 0:-1]),dim=1)  # 1  = pad_idx
+                dec_inp = torch.cat((torch.ones(size=[batch_size, 1]).long().to(device), trg1[:, 0:-1].to(device)),dim=1)  # 1  = pad_idx
                 out = v_model.forward(sel1.to(device), is_tr=True, dec_inp=dec_inp.long().to(device))
                 out = out.view((out.shape[0] * out.shape[1], out.shape[2]))
                 trg1 = trg1.view((trg1.shape[0] * trg1.shape[1],))
@@ -217,7 +224,7 @@ def main():
 
                 trg2 = src
                 # trg2_leng = lengths_src
-                dec_inp2 = torch.cat((torch.ones(size=[batch_size, 1]).long().to(device), trg2[:, 0:-1]),dim=1)  # 1  = pad_idx
+                dec_inp2 = torch.cat((torch.ones(size=[batch_size, 1]).long().to(device), trg2[:, 0:-1].to(device)),dim=1)  # 1  = pad_idx
                 out2 = v_model.forward(sel1.to(device), is_tr=True, dec_inp=dec_inp2.long().to(device))
                 out2 = out2.view((out2.shape[0] * out2.shape[1], out2.shape[2]))
                 trg2 = trg2.view((trg2.shape[0] * trg2.shape[1],))
@@ -231,6 +238,9 @@ def main():
                 loss = loss.cpu().detach().numpy()
                 ls_re_seq2seq_ep += loss
                 # v_model.forward(src=sel1, src_leng=lengths_sel, trg1=trg1, trg1_leng=trg1_leng, trg2=src, trg2_leng=lengths_src)  # trg1 e_model_out  trg2 gold
+                if batch_i//5000 == 0:
+                    torch.save(seq2seq.state_dict(), args.seq2seq_save_path + '_epoch_' + str(epoch_i) + '_batch_' + str(batch_i) + '.pt')
+                    torch.save(v_model.state_dict(), args.v_model_save_path + '_epoch_' + str(epoch_i) + '_batch_' + str(batch_i) + '.pt')
         print('test loss: ', ls_rl_ep)
         print('test reward parser b: ', rewards1)
         print('ls_re_seq2seq_ep: ', ls_re_seq2seq_ep)
